@@ -1,1 +1,8 @@
-streamlit
+
+streamlit==1.46.1
+langchain==0.3.26
+langchain-community==0.3.27
+pdfminer.six==20250506
+faiss-cpu==1.11.0
+httpx==0.28.1
+openai==1.93.0
