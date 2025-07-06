@@ -1,6 +1,6 @@
-
 import streamlit as st
 import os
+import openai
 
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores import FAISS
@@ -10,41 +10,41 @@ from langchain.schema import HumanMessage, SystemMessage
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.schema import ChatMessage
 
-# Function to extract text from an PDF file
 from pdfminer.high_level import extract_text
-
 from dotenv import load_dotenv
+
+# 🔐 Load API Key
 load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# loader
+# 확인 (개발 중에만 사용)
+assert openai.api_key is not None, "❌ OPENAI_API_KEY가 환경변수에서 불러와지지 않았습니다."
+
+# 📄 PDF 텍스트 추출
 def get_pdf_text(filename):
-    raw_text = extract_text(filename)
-    return raw_text
+    return extract_text(filename)
 
-# 문서 로드 및 청킹 (Loader + Splitter)
+# 📚 문서 처리 및 임베딩
 def process_uploaded_file(FILE_PATH):
-    # Load document if file is uploaded
     if FILE_PATH is not None:
-
-        # loader
         raw_text = get_pdf_text(FILE_PATH)
 
-        # splitter
+        # 텍스트 청킹
         text_splitter = CharacterTextSplitter(
-            separator = "\n\n",     # TODO: 어떤 문구를 기준으로? (스페이스바, 엔터, ',' 등)
-            chunk_size = 10000,      # TODO: 문서의 잘림 크기는 몇으로?
-            chunk_overlap = 2000,    # TODO: 겹치는 길이는 몇으로?
+            separator="\n\n",
+            chunk_size=10000,
+            chunk_overlap=2000,
         )
         all_splits = text_splitter.create_documents([raw_text])
-        print("총 " + str(len(all_splits)) + "개의 passage")
+        print("총", len(all_splits), "개의 청크 생성됨")
 
-        # storage
-        vectorstore = FAISS.from_documents(documents=all_splits, embedding=OpenAIEmbeddings())
+        # 벡터스토어 생성
+        vectorstore = FAISS.from_documents(all_splits, OpenAIEmbeddings())
 
         return vectorstore, raw_text
-    return None
+    return None, None
 
-# handle streaming conversation
+# 📡 스트리밍 출력 핸들러
 class StreamHandler(BaseCallbackHandler):
     def __init__(self, container, initial_text=""):
         self.container = container
@@ -54,37 +54,23 @@ class StreamHandler(BaseCallbackHandler):
         self.text += token
         self.container.markdown(self.text)
 
-# RAG 기반으로 답변 생성 (검색(Retriever), 생성(Generator), 연결(Chaining))
+# 🤖 질문에 답변 생성 (RAG)
 def generate_response(query_text, vectorstore, callback):
-
-    # retriever
-    docs_list = vectorstore.similarity_search(query_text, k=3) # TODO: 연관성 있는 문서는 몇 개?!
+    docs_list = vectorstore.similarity_search(query_text, k=3)
     docs = ""
     for i, doc in enumerate(docs_list):
         docs += f"'문서{i+1}':{doc.page_content}\n"
 
-    # generator
     llm = ChatOpenAI(
         model_name="gpt-4o-mini",
         temperature=0,
         streaming=True,
-        callbacks=[callback]
+        callbacks=[callback],
     )
-
-    # chaining
-    # prompt formatting
-#     system_prompt = """
-#     너는 문서에 대해 질의응답을 하는 조교야. \n
-# 주어진 문서를 참고하여 사용자의 질문에 답변을 해줘. \n
-# 문서에 내용이 정확하게 나와있지 않으면 대답하지 마.
-
-# 너는 괴팍한 성격을 가지고 있고 완전 츤데래야."""
 
     rag_prompt = [
         SystemMessage(
-            # content=system_prompt,
-            content="너는 문서에 대해 질의응답을 하는 '앵무새'야. 주어진 문서를 참고하여 사용자의 질문에 답변을 해줘. 문서에 내용이 정확하게 나와있지 않으면 대답하지 마. 이모티콘을 사용해서 앵무새처럼 귀엽고 친근하게 답변해줘! 항상 답변 뒤에는 ' 짹!'>' '이라고 정확하게 해줘"
-            "이 외에도 웹 검색을 통해 정보를 제시해줘. 문서 외에 질문에도 답변해줘."
+            content="너는 문서에 대해 질의응답을 하는 '앵무새'야. 주어진 문서를 참고해서 질문에 친절하게 답변해줘. 문서에 없으면 모르겠다고 해도 괜찮아! 이모티콘도 살짝 써줘. 항상 답변 끝에 ' 짹! 🦜'이라고 붙여줘."
         ),
         HumanMessage(
             content=f"질문:{query_text}\n\n{docs}"
@@ -94,77 +80,69 @@ def generate_response(query_text, vectorstore, callback):
     response = llm(rag_prompt)
     return response.content
 
+# 📄 요약 기능
 def generate_summarize(raw_text, callback):
+    llm = ChatOpenAI(
+        model_name="gpt-4o-mini",
+        temperature=0,
+        streaming=True,
+        callbacks=[callback],
+    )
 
-    # generator
-    llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0, streaming=True, callbacks=[callback])
-
-    # prompt formatting
     rag_prompt = [
-        SystemMessage(
-            content="다음 나올 문서를 'Notion style' 중요한 내용만."
-        ),
-        HumanMessage(
-            content=raw_text
-        ),
+        SystemMessage(content="다음 문서를 Notion 스타일로 요약해줘. 핵심만, 짧고 명확하게."),
+        HumanMessage(content=raw_text),
     ]
 
     response = llm(rag_prompt)
     return response.content
 
-# page title
-st.set_page_config(page_title='🦜어떤 문서든 물어봐!🦜')
-st.title('🦜어떤 문서든 물어봐!🦜')
+# 🧾 Streamlit 인터페이스
+st.set_page_config(page_title='🦜어떤 문서든 물어봐!')
+st.title('🦜 어떤 문서든 물어봐!')
 
-# file upload --> PDF만 받을 수 있도록 한다.
-# uploaded_file = st.file_uploader('Upload an document', type=['hwp','pdf'])
 st.markdown("""
-	<style>
-	.main { background-color: #f5f5f5; }
-	.sidebar .sidebar-content { background-color: #f0f0f0; }
-	.stButton>button { background-color: #4CAF50; color: white; }
-	</style>
-	""", unsafe_allow_html=True)
+<style>
+.main { background-color: #f5f5f5; }
+.sidebar .sidebar-content { background-color: #f0f0f0; }
+.stButton>button { background-color: #4CAF50; color: white; }
+</style>
+""", unsafe_allow_html=True)
 
-# 파일 업로드
-st.sidebar.header('📄 파일 업로드')
-uploaded_file = st.sidebar.file_uploader('문서를 업로드하세요!', type=['pdf'])
+# 📁 파일 업로드
+st.sidebar.header('📄 문서 업로드')
+uploaded_file = st.sidebar.file_uploader("PDF 문서를 업로드하세요", type=["pdf"])
 
-# file upload logic
+# 🔄 벡터스토어 처리
 if uploaded_file:
     vectorstore, raw_text = process_uploaded_file(uploaded_file)
-
-    # 초기에 한 번 만들고 session_state에 보관 --> session_state에 접근해서 반복하여 활용
     if vectorstore:
         st.session_state['vectorstore'] = vectorstore
         st.session_state['raw_text'] = raw_text
 
-# chatbot greatings
+# 💬 채팅 초기화
 if "messages" not in st.session_state:
     st.session_state["messages"] = [
         ChatMessage(
-            role="assistant", content="안녕하세요! 저는 문서에 대한 이해를 도와주는 앵무새입니다! 어떤게 궁금하신가요?!"
+            role="assistant",
+            content="안녕하세요! 저는 업로드한 문서를 이해하고 요약하거나 질문에 답변할 수 있는 앵무새예요. 🦜 무엇이 궁금한가요?"
         )
     ]
 
-# conversation history print --> 주석 처리하고 비교해보기
+# 💬 채팅 출력
 for msg in st.session_state.messages:
     st.chat_message(msg.role).write(msg.content)
 
-# message interaction
-if prompt := st.chat_input("'문서 요약 해줘' 라고 입력해보세요!"):
+# 💬 입력 처리
+if prompt := st.chat_input("예: '요약' 또는 '이 문서의 목적은?'"):
     st.session_state.messages.append(ChatMessage(role="user", content=prompt))
     st.chat_message("user").write(prompt)
 
     with st.chat_message("assistant"):
         stream_handler = StreamHandler(st.empty())
-
-        if prompt == "요약":
-            response = generate_summarize(st.session_state['raw_text'],stream_handler)
-
+        if prompt.strip() == "요약":
+            response = generate_summarize(st.session_state['raw_text'], stream_handler)
         else:
             response = generate_response(prompt, st.session_state['vectorstore'], stream_handler)
 
-    st.session_state.messages.append(
-        ChatMessage(role="assistant", content=response)
-    )
+    st.session_state.messages.append(ChatMessage(role="assistant", content=response))
