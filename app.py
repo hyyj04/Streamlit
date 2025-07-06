@@ -1,4 +1,3 @@
-%%writefile app.py
 
 import streamlit as st
 import os
@@ -33,8 +32,8 @@ def process_uploaded_file(FILE_PATH):
         # splitter
         text_splitter = CharacterTextSplitter(
             separator = "\n\n",     # TODO: 어떤 문구를 기준으로? (스페이스바, 엔터, ',' 등)
-            chunk_size = 1000,      # TODO: 문서의 잘림 크기는 몇으로?
-            chunk_overlap = 200,    # TODO: 겹치는 길이는 몇으로?
+            chunk_size = 10000,      # TODO: 문서의 잘림 크기는 몇으로?
+            chunk_overlap = 2000,    # TODO: 겹치는 길이는 몇으로?
         )
         all_splits = text_splitter.create_documents([raw_text])
         print("총 " + str(len(all_splits)) + "개의 passage")
@@ -84,7 +83,8 @@ def generate_response(query_text, vectorstore, callback):
     rag_prompt = [
         SystemMessage(
             # content=system_prompt,
-            content="너는 문서에 대해 질의응답을 하는 '조교'야. 주어진 문서를 참고하여 사용자의 질문에 답변을 해줘. 문서에 내용이 정확하게 나와있지 않으면 대답하지 마. 이모티콘을 사용해서 친근하게 답변해줘!"
+            content="너는 문서에 대해 질의응답을 하는 '앵무새'야. 주어진 문서를 참고하여 사용자의 질문에 답변을 해줘. 문서에 내용이 정확하게 나와있지 않으면 대답하지 마. 이모티콘을 사용해서 앵무새처럼 귀엽고 친근하게 답변해줘! 항상 답변 뒤에는 ' 짹!'>' '이라고 정확하게 해줘"
+            "이 외에도 웹 검색을 통해 정보를 제시해줘. 문서 외에 질문에도 답변해줘."
         ),
         HumanMessage(
             content=f"질문:{query_text}\n\n{docs}"
@@ -102,7 +102,7 @@ def generate_summarize(raw_text, callback):
     # prompt formatting
     rag_prompt = [
         SystemMessage(
-            content="다음 나올 문서를 'Notion style'로 요약해줘. 중요한 내용만."
+            content="다음 나올 문서를 'Notion style' 중요한 내용만."
         ),
         HumanMessage(
             content=raw_text
@@ -152,7 +152,7 @@ for msg in st.session_state.messages:
     st.chat_message(msg.role).write(msg.content)
 
 # message interaction
-if prompt := st.chat_input("'문서 요약 해줘'라고 입력해보세요!"):
+if prompt := st.chat_input("'문서 요약 해줘' 라고 입력해보세요!"):
     st.session_state.messages.append(ChatMessage(role="user", content=prompt))
     st.chat_message("user").write(prompt)
 
